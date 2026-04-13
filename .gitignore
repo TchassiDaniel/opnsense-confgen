@@ -54,3 +54,4 @@ publickey
 # Configuration XML
 config.xml
 config.iso
+env/

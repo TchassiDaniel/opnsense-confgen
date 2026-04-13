@@ -1,16 +1,8 @@
 <?xml version="1.0"?>
-<opt_dhcp>
-  <enable>1</enable>
-  <gateway></gateway>
-  <ddnsdomainalgorithm>hmac-md5</ddnsdomainalgorithm>
-  <numberoptions>
-    <item />
-  </numberoptions>
-  <range>
-    <from></from>
-    <to></to>
-  </range>
-  <winsserver />
-  <dnsserver></dnsserver>
-  <ntpserver />
-</opt_dhcp>
+<dhcp_ranges>
+  <interface></interface>
+  <start_addr></start_addr>
+  <end_addr></end_addr>
+  <domain_type>range</domain_type>
+  <nosync>0</nosync>
+</dhcp_ranges>

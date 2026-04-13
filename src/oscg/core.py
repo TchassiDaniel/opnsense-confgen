@@ -44,7 +44,10 @@ class GenerateConfigs:
         """Set configuration revision information."""
         revision = self._root.find('revision')
         revision.find('time').text = str(round(time.time(), 4))
-        version = importlib.metadata.version('opnsense-confgen')
+        try:
+            version = importlib.metadata.version('opnsense-confgen')
+        except importlib.metadata.PackageNotFoundError:
+            version = 'unknown'
         description = f'Created by OPNsense Configuration Generator v{version}'
         revision.find('description').text = description
 
@@ -75,29 +78,66 @@ class GenerateConfigs:
         lan_if.find('subnet').text = self._ini_config['LAN']['subnet']
 
     def _set_lan_dhcp(self):
-        """Set the LAN DHCP section of configuration."""
-        lan_dhcp = self._root.find('dhcpd').find('lan')
-        lan_dhcp.find('gateway').text = self._ini_config['LAN']['ip']
-        lan_dhcp.find('range').find('from').text = self._ini_config['LAN']['dhcp_start']
-        lan_dhcp.find('range').find('to').text = self._ini_config['LAN']['dhcp_end']
-        lan_dhcp.find('dnsserver').text = self._ini_config['LAN']['ip']
+        """Set the LAN DHCP section of configuration using dnsmasq."""
+        dnsmasq = self._root.find('dnsmasq')
+        
+        # Create a dhcp_range element for LAN
+        with (importlib.resources.files('oscg.templates') / 'opt_dhcp.xml').open('r') as dhcp_template:
+            dhcp_range = xml.etree.ElementTree.fromstring(dhcp_template.read())
+            
+        dhcp_range.set('uuid', str(uuid.uuid4()))
+        dhcp_range.find('interface').text = 'lan'
+        dhcp_range.find('start_addr').text = self._ini_config['LAN']['dhcp_start']
+        dhcp_range.find('end_addr').text = self._ini_config['LAN']['dhcp_end']
+        
+        dnsmasq.append(dhcp_range)
 
     def _set_gateway(self):
-        """Set the gateway section of configuration."""
-        gateway = self._root.find('gateways').find('gateway_item')
-        gateway.find('gateway').text = self._ini_config['WAN']['gateway']
-
+        """Set the gateway section of configuration in OPNsense/Gateways."""
+        gateways = self._root.find('OPNsense').find('Gateways')
+        
+        # Create gateway item
+        gateway_item = xml.etree.ElementTree.Element('gateway_item')
+        gateway_item.set('uuid', str(uuid.uuid4()))
+        
+        xml.etree.ElementTree.SubElement(gateway_item, 'disabled').text = '0'
+        xml.etree.ElementTree.SubElement(gateway_item, 'name').text = 'WAN_GW'
+        xml.etree.ElementTree.SubElement(gateway_item, 'descr').text = 'Interface WAN Gateway'
+        xml.etree.ElementTree.SubElement(gateway_item, 'interface').text = 'wan'
+        xml.etree.ElementTree.SubElement(gateway_item, 'ipprotocol').text = 'inet'
+        xml.etree.ElementTree.SubElement(gateway_item, 'gateway').text = self._ini_config['WAN']['gateway']
+        xml.etree.ElementTree.SubElement(gateway_item, 'defaultgw').text = '1'
+        xml.etree.ElementTree.SubElement(gateway_item, 'monitor_disable').text = '1'
+        
         gateway_ip = ipaddress.ip_address(self._ini_config['WAN']['gateway'])
-
         wan_ip = self._ini_config['WAN']['ip']
         wan_subnet = self._ini_config['WAN']['subnet']
         wan_netblock = ipaddress.ip_network(f'{wan_ip}/{wan_subnet}', strict=False)
-        far_gateway = gateway.find('fargw')
 
         if gateway_ip in wan_netblock:
-            far_gateway.text = '0'
+            xml.etree.ElementTree.SubElement(gateway_item, 'fargw').text = '0'
         else:
-            far_gateway.text = '1'
+            xml.etree.ElementTree.SubElement(gateway_item, 'fargw').text = '1'
+            
+        gateways.append(gateway_item)
+
+    def _set_dns_forwarding(self):
+        """Configure Unbound Plus to forward local domain to Dnsmasq."""
+        if not self._domain:
+            return
+            
+        unboundplus = self._root.find('OPNsense').find('unboundplus')
+        dots = unboundplus.find('dots')
+        
+        dot = xml.etree.ElementTree.SubElement(dots, 'dot')
+        dot.set('uuid', str(uuid.uuid4()))
+        xml.etree.ElementTree.SubElement(dot, 'enabled').text = '1'
+        xml.etree.ElementTree.SubElement(dot, 'type').text = 'forward'
+        xml.etree.ElementTree.SubElement(dot, 'domain').text = self._domain
+        xml.etree.ElementTree.SubElement(dot, 'server').text = '127.0.0.1'
+        xml.etree.ElementTree.SubElement(dot, 'port').text = '53053'
+        xml.etree.ElementTree.SubElement(dot, 'forward_first').text = '1'
+        xml.etree.ElementTree.SubElement(dot, 'description').text = f'Forward {self._domain} to Dnsmasq DHCP'
 
     def _check_serverkey(self):
         """Check for WireGuard server key and generate one if missing."""
@@ -165,10 +205,10 @@ class GenerateConfigs:
         """Append WireGuard settings to configuration."""
         with (importlib.resources.files('oscg.templates') / 'wg_conf.xml').open('r') as wg_conf_template:
             wg_conf = xml.etree.ElementTree.fromstring(wg_conf_template.read())
-            wgc = wg_conf.find('wireguard')
+            # wg_conf is already the <wireguard> element based on template
 
         # Add server endpoint settings.
-        wg_server = wgc.find('server').find('servers').find('server')
+        wg_server = wg_conf.find('server').find('servers').find('server')
         wg_server.set('uuid', str(uuid.uuid4()))
         wg_server.find('pubkey').text = self._ini_config['WGB']['server_pubkey']
         wg_server.find('privkey').text = self._ini_config['WGB']['server_privkey']
@@ -178,12 +218,12 @@ class GenerateConfigs:
         wg_server.find('peers').text = client_id
 
         # Add client settings.
-        wg_client = wgc.find('client').find('clients').find('client')
+        wg_client = wg_conf.find('client').find('clients').find('client')
         wg_client.set('uuid', client_id)
         wg_client.find('pubkey').text = self._ini_config['WGB']['client_pubkey']
         wg_client.find('tunneladdress').text = self._ini_config['WGB']['client_ip']
 
-        self._root.append(wg_conf)
+        self._root.find('OPNsense').append(wg_conf)
 
     def _find_opt(self):
         """Find all sections of the config that describe optional interfaces."""
@@ -211,35 +251,53 @@ class GenerateConfigs:
             self._root.find('interfaces').append(opt_if)
 
     def _add_opt_dhcp(self, match):
-        """Append optional interface DHCP settings to configuration."""
+        """Append optional interface DHCP settings to configuration using dnsmasq."""
         section = match.group(0)
+        dnsmasq = self._root.find('dnsmasq')
 
         with (importlib.resources.files('oscg.templates') / 'opt_dhcp.xml').open('r') as opt_dhcp_template:
-            opt_dhcp = xml.etree.ElementTree.fromstring(opt_dhcp_template.read())
+            dhcp_range = xml.etree.ElementTree.fromstring(opt_dhcp_template.read())
 
-            opt_dhcp.tag = 'opt{}'.format(match.group('number'))
-            opt_dhcp.find('gateway').text = self._ini_config[section]['ip']
-            opt_dhcp.find('range').find('from').text = self._ini_config[section].get('dhcp_start')
-            opt_dhcp.find('range').find('to').text = self._ini_config[section]['dhcp_end']
-            opt_dhcp.find('dnsserver').text = self._ini_config[section]['ip']
+        dhcp_range.set('uuid', str(uuid.uuid4()))
+        dhcp_range.find('interface').text = 'opt{}'.format(match.group('number'))
+        dhcp_range.find('start_addr').text = self._ini_config[section].get('dhcp_start')
+        dhcp_range.find('end_addr').text = self._ini_config[section]['dhcp_end']
 
-            self._root.find('dhcpd').append(opt_dhcp)
+        dnsmasq.append(dhcp_range)
 
     def _add_apikey(self):
         """Add optional root API key."""
-        with (importlib.resources.files('oscg.templates') / 'apikey.xml').open('r') as apikey_template:
-            apikey = xml.etree.ElementTree.fromstring(apikey_template.read())
-        apikey.find('item').find('key').text = self._ini_config['API']['key']
-        apikey.find('item').find('secret').text = self._ini_config['API']['secret']
-        self._root.find('system').find('user').append(apikey)
-        expires = xml.etree.ElementTree.Element('expires')
-        self._root.find('system').find('user').append(expires)
-        authorizedkeys = xml.etree.ElementTree.Element('authorizedkeys')
-        self._root.find('system').find('user').append(authorizedkeys)
-        ipsecpsk = xml.etree.ElementTree.Element('ipsecpsk')
-        self._root.find('system').find('user').append(ipsecpsk)
-        otp_seed = xml.etree.ElementTree.Element('otp_seed')
-        self._root.find('system').find('user').append(otp_seed)
+        key = self._ini_config['API']['key']
+        secret = self._ini_config['API']['secret']
+        # OPNsense format is "key|secret"
+        combined = f'{key}|{secret}'
+
+        # Find root user
+        root_user = None
+        for user in self._root.find('system').findall('user'):
+            if user.find('name').text == 'root':
+                root_user = user
+                break
+
+        if root_user is not None:
+            # Check if user already has an apikeys element
+            apikeys = root_user.find('apikeys')
+            if apikeys is None:
+                apikeys = xml.etree.ElementTree.SubElement(root_user, 'apikeys')
+
+            # closing tag on newline with 6 spaces indentation
+            suffix = '\n      '
+            if apikeys.text:
+                apikeys.text = f'{apikeys.text.strip()} {combined}{suffix}'
+            else:
+                apikeys.text = f'{combined}{suffix}'
+        else:
+            # Fallback (template mismatch)
+            user = self._root.find('system').find('user')
+            apikeys = user.find('apikeys')
+            if apikeys is None:
+                apikeys = xml.etree.ElementTree.SubElement(user, 'apikeys')
+            apikeys.text = f'{combined}\n      '
 
     def _gen_os_config(self):
         """Generate an OPNsense configuration file."""
@@ -249,6 +307,7 @@ class GenerateConfigs:
         self._set_lan_if()
         self._set_lan_dhcp()
         self._set_gateway()
+        self._set_dns_forwarding()
 
         # Handle WireGuard bootstrap if needed.
         if self._ini_config.has_section('WGB'):
