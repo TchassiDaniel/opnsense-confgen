@@ -1,6 +1,8 @@
 # OPNsense Configuration Generator
 
-This package takes a Python ConfigParser formatted INI file and generates a ready to use config.xml file for OPNsense. The intent is for the file to be used during the installation process by the OPNsense Importer. The end result is a minimal working configuraion with interfaces fully configured. Included in this package are a command line interface and a class which is importable into Python scripts and other applications.
+This package takes a Python ConfigParser formatted INI file and generates a ready to use config.xml file for OPNsense. It is fully compatible with modern OPNsense versions (v24-v26) and supports the "piped" API key format.
+
+The intent is for the file to be used during the installation process by the OPNsense Importer. The end result is a minimal working configuraion with interfaces fully configured. Included in this package are a command line interface and a class which is importable into Python scripts and other applications.
 
 More information about the OPNsense importer can be found [here](https://docs.opnsense.org/manual/install.html#opnsense-importer).
 
@@ -30,7 +32,7 @@ The WireGuard bootstrap has a number of options. If the INI contains a server pr
 
 ## API Key Bootstrap
 
-Another optional feature is to add a root API key bootstrap. If a `API` section is provided in the INI, then the provided key and secret will be appended to the user section in the configuration for the root user. This API key can be used immediately after install is complete to make further configuration changes to the OPNsense instance.
+Another optional feature is to add a root API key bootstrap. If a `API` section is provided in the INI, then the provided key and secret will be appended to the user section in the configuration for the root user using the modern `key|secret` format. This API key can be used immediately after install is complete to make further configuration changes to the OPNsense instance.
 
 ## Web Console Shortcut
 
@@ -38,12 +40,26 @@ For convenience, an optional macOS shortcut file can be created that leads to th
 
 ## ISO Image
 
-An alterative output format is an ISO image that contains the `config.xml` file in a directory named `conf` as expected by the OPNsense Importer. With OPNsense version 22.1.7, the importer is able to detect ISO9660 and grab the config. This mode of delivery can be used in a virtualization environment such as Proxmox which has shared ISO storage. One ISO can be used simultaneously in multiple OPNsense deployments.
+An alterative output format is an ISO image that contains the `config.xml` file in a directory named `conf` as expected by the OPNsense Importer. The importer is able to detect ISO9660 and grab the config. This mode of delivery can be used in a virtualization environment such as Proxmox which has shared ISO storage. One ISO can be used simultaneously in multiple OPNsense deployments.
 
 ## Installation
 
+### From Repository
+
+To install directly from the source code:
+
+```bash
+git clone https://github.com/TchassiDaniel/opnsense-confgen.git
+cd opnsense-confgen
+pip install .
 ```
-pip install opnsense-confgen
+
+### Via Pip from GitHub
+
+Or install via pip directly from the repository:
+
+```bash
+pip install git+https://github.com/TchassiDaniel/opnsense-confgen.git
 ```
 
 ## Command Line Usage
